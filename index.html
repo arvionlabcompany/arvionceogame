@@ -54,6 +54,10 @@ canvas{width:100%;image-rendering:pixelated;background:#0a1626;border:2px solid 
 #toasts .up{border-left-color:var(--teal)}#toasts .down{border-left-color:#ff5a5f}#toasts .vs{border-left-color:var(--amber)}
 #toasts .out{opacity:0;transform:translateX(20px)}
 @keyframes tin{from{opacity:0;transform:translateX(20px)}}
+.bn{position:fixed;left:50%;top:70px;transform:translateX(-50%);z-index:7;pointer-events:none;text-align:center;padding:12px 18px;background:#08121f;border:3px solid var(--amber);font:700 14px var(--px);width:max-content;max-width:92vw;animation:bin .35s ease-out}
+.bn.down{border-color:#ff5a5f}.bn.up{border-color:var(--teal)}
+.bn small{display:block;font:13px var(--tx);color:#cfe0ea;margin-top:4px}
+@keyframes bin{from{opacity:0;transform:translate(-50%,-14px)}}
 </style>
 </head>
 <body>
@@ -118,8 +122,10 @@ async function start() {
   }).on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'feed' }, refreshFeed).subscribe();
   setInterval(refresh, 20000); requestAnimationFrame(draw);
 }
+let reigns = [];
 async function refresh() {
   const { data } = await sb.from('players').select('*'); players = {}; (data || []).forEach(p => players[p.id] = p);
+  const rg = await sb.from('reigns').select('*').order('started_at', { ascending: false }).limit(200); reigns = rg.data || [];
   await refreshFeed(); ui();
 }
 let lastFeedId = null; const fights = [];
@@ -141,7 +147,7 @@ function ui() {
   const vag = ROLES.map((n, i) => i > 1 ? `<li>${n}: ${CAP[i] - all.filter(x => x.role === i).length} de ${CAP[i]}</li>` : '').join('');
   const hist = k => feed.filter(f => f.kind === k).slice(0, 5).map(f => `<li>@${f.handle}${k === 'promo' ? ' → ' + ROLES[f.role] : k === 'demote' ? ' caiu para ' + ROLES[f.role] : k === 'duel' ? ' venceu @' + f.other + ' (' + ROLES[f.role] + ')' : k === 'brawl' ? ' derrubou @' + f.other : ''}</li>`).join('') || '<li>—</li>';
   $('#mural').innerHTML = `<div class="logo" style="font-size:12px">${BRAND}</div><div style="font-size:12px;color:#9fb4c4">${SLOGAN}</div>
-   <h4>CEO atual</h4><ul><li>${ceo ? '@' + ceo.handle : 'Vaga aberta'}</li></ul>
+   <h4>CEO atual</h4><ul><li>${ceo ? '@' + ceo.handle + (reigns.some(r => !r.ended_at && r.handle === ceo.handle) ? ' · no trono há ' + dur(Date.now() - new Date(reigns.find(r => !r.ended_at).started_at)) : '') : 'Vaga aberta'}</li></ul>
    <h4>Últimas promoções · ARVION LAB</h4><ul>${hist('promo')}</ul>
    <h4>Disputas</h4><ul>${hist('duel')}</ul>
    <h4>Brigas</h4><ul>${hist('brawl')}</ul>
@@ -176,6 +182,7 @@ function renderStats() {
    <div class="kpis"><div><b>${cnt('promo')}</b>promoções</div><div><b>${cnt('demote')}</b>quedas</div>
    <div><b>${gap('promo')}</b>entre promoções</div><div><b>${gap('demote')}</b>entre quedas</div>
    <div><b>${gap('duel')}</b>entre disputas</div><div><b>${reign}</b>reinado do CEO atual</div></div>
+   <h3 style="margin-top:14px">HALL DA FAMA · MAIORES REINADOS</h3><ol style="margin:0;padding-left:20px;font-size:14px;line-height:1.7">${[...reigns].map(r => ({ h: r.handle, ms: (r.ended_at ? +new Date(r.ended_at) : now) - new Date(r.started_at), on: !r.ended_at })).sort((a, b) => b.ms - a.ms).slice(0, 5).map(x => `<li>@${x.h} · ${dur(x.ms)}${x.on ? ' (reinando agora)' : ''}</li>`).join('') || '<li>Sem reinados ainda.</li>'}</ol>
    <h3 style="margin-top:14px">ÚLTIMOS MOVIMENTOS</h3><ul>${last || '<li>Sem movimentos ainda.</li>'}</ul>`;
 }
 function renderHist() {
@@ -207,6 +214,10 @@ function makeCard() {
     else if (mine.kind === 'demote') { head = 'QUE QUEDA!'; sub = 'CAÍ PARA ' + ROLES[mine.role].toUpperCase(); col = '#ff5a5f'; }
     else if (mine.kind === 'duel' || mine.kind === 'brawl') { head = won ? 'VENCI A DISPUTA' : 'PERDI A DISPUTA'; sub = (won ? 'CONTRA @' + mine.other : 'PARA @' + mine.handle).toUpperCase(); col = won ? '#FFB020' : '#ff5a5f'; }
   }
+  const best = reigns.filter(r => r.handle === me.handle).map(r => (r.ended_at ? +new Date(r.ended_at) : Date.now()) - new Date(r.started_at)).sort((a, b) => b - a)[0];
+  if (best !== undefined) {   // quem já foi CEO ganha um card especial
+    head = p.role === 8 ? 'SOU O CEO' : 'FUI CEO'; sub = (p.role === 8 ? 'NO TRONO HÁ ' : 'POR ') + dur(best).toUpperCase(); col = '#FFB020';
+  }
   const cv = document.createElement('canvas'); cv.width = 1080; cv.height = 1920; const x = cv.getContext('2d'), F = "Silkscreen, 'Courier New', monospace";
   const t = (s, px, y, sz, color) => { let z = sz; x.textAlign = 'center'; do { x.font = `700 ${z}px ${F}`; z -= 2; } while (x.measureText(s).width > 960 && z > 20); x.fillStyle = color; x.fillText(s, px, y); };
   x.fillStyle = '#0E1B2C'; x.fillRect(0, 0, 1080, 1920); x.fillStyle = '#12253a'; x.fillRect(60, 60, 960, 1800); x.strokeStyle = '#31465C'; x.lineWidth = 6; x.strokeRect(60, 60, 960, 1800);
@@ -236,11 +247,17 @@ function toast(txt, cls) {
   const box = $('#toasts'); box.append(el); while (box.children.length > 4) box.firstChild.remove();
   setTimeout(() => el.classList.add('out'), 4200); setTimeout(() => el.remove(), 4800);
 }
+function banner(title, sub, cls) {
+  const el = document.createElement('div'); el.className = 'bn ' + cls; el.innerHTML = title + '<small>' + sub + '</small>';
+  document.body.append(el); setTimeout(() => el.remove(), 5500);
+}
 function onEvent(f) {
   const r = ROLES[f.role];
   if (f.kind === 'promo') toast('▲ @' + f.handle + ' subiu para ' + r, 'up');
   else if (f.kind === 'demote') toast('▼ @' + f.handle + ' desceu para ' + r, 'down');
   else if (f.kind === 'duel') toast('⚔ @' + f.handle + ' venceu @' + f.other + ' (' + r + ')', 'vs');
+  else if (f.kind === 'review') banner('⚠ AVALIAÇÃO DE DESEMPENHO', f.role + ' funcionário(s) desceram de cargo', 'down');
+  else if (f.kind === 'bonus') banner('💰 BÔNUS GERAL', 'Todos receberam um bônus da empresa', 'up');
   else if (f.kind === 'brawl') {
     toast('▼ @' + f.other + ' desceu para ' + ROLES[f.role - 1], 'down'); toast('⚔ @' + f.handle + ' venceu a briga', 'vs');
     fights.push({ w: f.handle, l: f.other, r: f.role, t0: performance.now() }); fights.splice(0, fights.length - 20);
