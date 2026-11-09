@@ -49,6 +49,11 @@ canvas{width:100%;image-rendering:pixelated;background:#0a1626;border:2px solid 
 .kpis{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:12px;font-size:13px}
 .kpis b{display:block;font-family:var(--px);font-size:16px;color:var(--teal)}
 .lg{font-size:12px;margin-top:6px;color:#9fb4c4}.lg u{text-decoration:none;display:inline-block;width:10px;height:10px;margin:0 4px 0 10px}
+#toasts{position:fixed;right:10px;bottom:calc(84px + env(safe-area-inset-bottom,0px));display:flex;flex-direction:column;gap:6px;align-items:flex-end;pointer-events:none;z-index:6;max-width:min(300px,80vw)}
+#toasts .t{padding:9px 12px;font-size:13px;background:#08121fee;border:2px solid var(--steel);border-left-width:6px;animation:tin .25s ease-out;transition:opacity .5s,transform .5s}
+#toasts .up{border-left-color:var(--teal)}#toasts .down{border-left-color:#ff5a5f}#toasts .vs{border-left-color:var(--amber)}
+#toasts .out{opacity:0;transform:translateX(20px)}
+@keyframes tin{from{opacity:0;transform:translateX(20px)}}
 </style>
 </head>
 <body>
@@ -78,6 +83,7 @@ canvas{width:100%;image-rendering:pixelated;background:#0a1626;border:2px solid 
   <section id="t-stats" class="card tab" hidden></section>
   <section id="t-hist" class="card tab" hidden></section>
   <nav id="nav"><button data-t="jogo" class="on">JOGO</button><button data-t="stats">ESTATÍSTICAS</button><button data-t="hist">MINHA HISTÓRIA</button></nav>
+  <div id="toasts" aria-live="polite"></div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
@@ -116,8 +122,12 @@ async function refresh() {
   const { data } = await sb.from('players').select('*'); players = {}; (data || []).forEach(p => players[p.id] = p);
   await refreshFeed(); ui();
 }
+let lastFeedId = null; const fights = [];
 async function refreshFeed() {
-  const { data } = await sb.from('feed').select('*').order('id', { ascending: false }).limit(400); feed = data || []; ui();
+  const { data } = await sb.from('feed').select('*').order('id', { ascending: false }).limit(400); feed = data || [];
+  if (lastFeedId === null) lastFeedId = feed.length ? feed[0].id : 0;   // primeira carga: sem avisos antigos
+  else if (feed.length) { feed.filter(f => f.id > lastFeedId).reverse().forEach(onEvent); lastFeedId = Math.max(lastFeedId, feed[0].id); }
+  ui();
 }
 function ui() {
   const p = players[me?.id]; if (!p) return;
@@ -129,11 +139,12 @@ function ui() {
   const all = Object.values(players), top = (k) => [...all].sort((a, b) => b[k] - a[k]).slice(0, 5);
   const ceo = all.find(x => x.role === 8), li = a => a.map(x => `<li>@${x.handle}</li>`).join('') || '<li>—</li>';
   const vag = ROLES.map((n, i) => i > 1 ? `<li>${n}: ${CAP[i] - all.filter(x => x.role === i).length} de ${CAP[i]}</li>` : '').join('');
-  const hist = k => feed.filter(f => f.kind === k).slice(0, 5).map(f => `<li>@${f.handle}${k === 'promo' ? ' → ' + ROLES[f.role] : k === 'demote' ? ' caiu para ' + ROLES[f.role] : k === 'duel' ? ' venceu @' + f.other + ' (' + ROLES[f.role] + ')' : ''}</li>`).join('') || '<li>—</li>';
+  const hist = k => feed.filter(f => f.kind === k).slice(0, 5).map(f => `<li>@${f.handle}${k === 'promo' ? ' → ' + ROLES[f.role] : k === 'demote' ? ' caiu para ' + ROLES[f.role] : k === 'duel' ? ' venceu @' + f.other + ' (' + ROLES[f.role] + ')' : k === 'brawl' ? ' derrubou @' + f.other : ''}</li>`).join('') || '<li>—</li>';
   $('#mural').innerHTML = `<div class="logo" style="font-size:12px">${BRAND}</div><div style="font-size:12px;color:#9fb4c4">${SLOGAN}</div>
    <h4>CEO atual</h4><ul><li>${ceo ? '@' + ceo.handle : 'Vaga aberta'}</li></ul>
    <h4>Últimas promoções · ARVION LAB</h4><ul>${hist('promo')}</ul>
    <h4>Disputas</h4><ul>${hist('duel')}</ul>
+   <h4>Brigas</h4><ul>${hist('brawl')}</ul>
    <h4>Quedas de cargo</h4><ul>${hist('demote')}</ul>
    <h4>Mais ricos</h4><ol>${top('money').map(x => `<li>@${x.handle} · ${brl(x.money)}</li>`).join('')}</ol>
    <h4>Mais felizes</h4><ol>${li(top('happiness'))}</ol>
@@ -152,11 +163,11 @@ const gap = k => { const t = feed.filter(f => f.kind === k).map(f => +new Date(f
 
 function renderStats() {
   const N = 12, H = 3600e3, now = Date.now(), b = Array.from({ length: N }, () => ({ p: 0, d: 0, v: 0 }));
-  feed.forEach(f => { const i = N - 1 - Math.floor((now - new Date(f.created_at)) / H); if (i < 0 || i >= N) return; if (f.kind === 'promo') b[i].p++; else if (f.kind === 'demote') b[i].d++; else if (f.kind === 'duel') b[i].v++; });
+  feed.forEach(f => { const i = N - 1 - Math.floor((now - new Date(f.created_at)) / H); if (i < 0 || i >= N) return; if (f.kind === 'promo') b[i].p++; else if (f.kind === 'demote') b[i].d++; else if (f.kind === 'duel' || f.kind === 'brawl') b[i].v++; });
   const mx = Math.max(1, ...b.map(x => x.p + x.d + x.v)), cnt = k => feed.filter(f => f.kind === k).length;
   const ceo = Object.values(players).find(x => x.role === 8), ev = feed.find(f => f.role === 8 && (f.kind === 'promo' || f.kind === 'duel'));
   const reign = ceo && ev && ev.handle === ceo.handle ? dur(now - new Date(ev.created_at)) : '—';
-  const last = feed.filter(f => ['promo', 'demote', 'duel'].includes(f.kind)).slice(0, 10).map(f => `<li><b>${ago(f.created_at)}</b> · @${f.handle} ${f.kind === 'promo' ? 'subiu para ' + ROLES[f.role] : f.kind === 'demote' ? 'caiu para ' + ROLES[f.role] : 'venceu @' + f.other + ' (' + ROLES[f.role] + ')'}</li>`).join('');
+  const last = feed.filter(f => ['promo', 'demote', 'duel', 'brawl'].includes(f.kind)).slice(0, 10).map(f => `<li><b>${ago(f.created_at)}</b> · @${f.handle} ${f.kind === 'promo' ? 'subiu para ' + ROLES[f.role] : f.kind === 'demote' ? 'caiu para ' + ROLES[f.role] : f.kind === 'brawl' ? 'venceu a briga e derrubou @' + f.other : 'venceu @' + f.other + ' (' + ROLES[f.role] + ')'}</li>`).join('');
   $('#t-stats').innerHTML = `<h3>ARVION LAB · ESTATÍSTICAS</h3>
    <div style="font-size:13px;color:#9fb4c4">Últimas 12 horas, hora a hora</div>
    <div class="chart">${b.map(x => `<div class="col"><i style="height:${x.p / mx * 100}%;background:#2EE6C5"></i><i style="height:${x.v / mx * 100}%;background:#FFB020"></i><i style="height:${x.d / mx * 100}%;background:#ff5a5f"></i></div>`).join('')}</div>
@@ -170,7 +181,7 @@ function renderStats() {
 function renderHist() {
   const h = me.handle, L = feed.filter(f => f.handle === h || f.other === h).slice(0, 40).map(f => {
     const s = f.kind === 'hire' ? 'Você entrou na ARVION LAB como Estagiário' : f.kind === 'promo' ? 'Você foi promovido a ' + ROLES[f.role]
-      : f.kind === 'demote' ? 'Você caiu para ' + ROLES[f.role] : f.handle === h ? 'Você venceu @' + f.other + ' na disputa por ' + ROLES[f.role] : 'Você perdeu a disputa para @' + f.handle;
+      : f.kind === 'demote' ? 'Você caiu para ' + ROLES[f.role] : f.kind === 'brawl' ? (f.handle === h ? 'Você venceu uma briga e derrubou @' + f.other : 'Você perdeu a briga para @' + f.handle + ' e desceu para ' + ROLES[f.role - 1]) : f.handle === h ? 'Você venceu @' + f.other + ' na disputa por ' + ROLES[f.role] : 'Você perdeu a disputa para @' + f.handle;
     return `<li><b>${ago(f.created_at)}</b> · ${s}</li>`; });
   $('#t-hist').innerHTML = `<h3>ARVION LAB · MINHA HISTÓRIA</h3><ul>${L.join('') || '<li>Nada ainda. Aguarde o próximo ciclo.</li>'}</ul>`;
 }
@@ -194,7 +205,7 @@ function makeCard() {
     const won = mine.handle === me.handle;
     if (mine.kind === 'promo') { head = 'PROMOÇÃO!'; sub = 'AGORA SOU ' + ROLES[mine.role].toUpperCase(); }
     else if (mine.kind === 'demote') { head = 'QUE QUEDA!'; sub = 'CAÍ PARA ' + ROLES[mine.role].toUpperCase(); col = '#ff5a5f'; }
-    else if (mine.kind === 'duel') { head = won ? 'VENCI A DISPUTA' : 'PERDI A DISPUTA'; sub = (won ? 'CONTRA @' + mine.other : 'PARA @' + mine.handle).toUpperCase(); col = won ? '#FFB020' : '#ff5a5f'; }
+    else if (mine.kind === 'duel' || mine.kind === 'brawl') { head = won ? 'VENCI A DISPUTA' : 'PERDI A DISPUTA'; sub = (won ? 'CONTRA @' + mine.other : 'PARA @' + mine.handle).toUpperCase(); col = won ? '#FFB020' : '#ff5a5f'; }
   }
   const cv = document.createElement('canvas'); cv.width = 1080; cv.height = 1920; const x = cv.getContext('2d'), F = "Silkscreen, 'Courier New', monospace";
   const t = (s, px, y, sz, color) => { let z = sz; x.textAlign = 'center'; do { x.font = `700 ${z}px ${F}`; z -= 2; } while (x.measureText(s).width > 960 && z > 20); x.fillStyle = color; x.fillText(s, px, y); };
@@ -218,6 +229,23 @@ function makeCard() {
   });
 }
 $('#card').onclick = makeCard;
+
+// ====== Avisos (canto inferior direito, somem sozinhos) ======
+function toast(txt, cls) {
+  const el = document.createElement('div'); el.className = 't ' + cls; el.textContent = txt;
+  const box = $('#toasts'); box.append(el); while (box.children.length > 4) box.firstChild.remove();
+  setTimeout(() => el.classList.add('out'), 4200); setTimeout(() => el.remove(), 4800);
+}
+function onEvent(f) {
+  const r = ROLES[f.role];
+  if (f.kind === 'promo') toast('▲ @' + f.handle + ' subiu para ' + r, 'up');
+  else if (f.kind === 'demote') toast('▼ @' + f.handle + ' desceu para ' + r, 'down');
+  else if (f.kind === 'duel') toast('⚔ @' + f.handle + ' venceu @' + f.other + ' (' + r + ')', 'vs');
+  else if (f.kind === 'brawl') {
+    toast('▼ @' + f.other + ' desceu para ' + ROLES[f.role - 1], 'down'); toast('⚔ @' + f.handle + ' venceu a briga', 'vs');
+    fights.push({ w: f.handle, l: f.other, r: f.role, t0: performance.now() }); fights.splice(0, fights.length - 20);
+  }
+}
 $('#share').onclick = () => { const t = `Entrei na ${BRAND} como @${me.handle}. ${SLOGAN}`; navigator.share ? navigator.share({ title: BRAND, text: t, url: location.href }) : navigator.clipboard.writeText(t + ' ' + location.href).then(() => $('#msg').textContent = 'Texto copiado.'); };
 
 // ====== Desenho ======
@@ -245,12 +273,25 @@ function draw(t) {
     const v = vis[p.id] ||= { base: cx, x: cx };
     v.base += (cx - v.base) * 0.04;                                        // desliza até a vaga se ela mudar
     v.x = v.base + range * Math.sin(ph + t / 2200);                        // vai e volta devagar
-    const y = TOP + (8 - p.role) * FH + FH - 4, s = SPR[p.role], bob = Math.sin(t / 200 + ph) * 1.5;
+    let y = TOP + (8 - p.role) * FH + FH - 4, s = SPR[p.role], bob = Math.sin(t / 200 + ph) * 1.5;
+    const now = performance.now(), fi = fights.find(f => (f.w === p.handle || f.l === p.handle) && now - f.t0 < 4200);
+    if (fi) {   // briga: vão ao centro do andar, lutam e o perdedor cai para o andar de baixo
+      const el = now - fi.t0, k = (a, b) => Math.max(0, Math.min(1, (el - a) / (b - a))), isW = fi.w === p.handle;
+      const gy0 = TOP + (8 - fi.r) * FH + FH - 4, back = isW ? k(2600, 3400) : k(3300, 4200), m = k(0, 800) * (1 - back);
+      v.x = v.x + (270 + (isW ? -16 : 16) - v.x) * m + (el > 800 && el < 2600 ? Math.sin(el / 25) * 3 : 0);
+      if (!isW) { const fall = k(2600, 3300); y = gy0 + (y - gy0) * fall; if (fall < 1) s = SPR[fi.r]; }
+    }
     g.fillStyle = s.b; g.fillRect(v.x, y - 30 + bob, 14, 18); g.fillStyle = '#f1c9a5'; g.fillRect(v.x + 2, y - 40 + bob, 10, 10);
     g.fillStyle = '#222'; g.fillRect(v.x + 2, y - 12, 4, 12); g.fillRect(v.x + 8, y - 12, 4, 12);
     if (s.t) { g.fillStyle = '#c0392b'; g.fillRect(v.x + 6, y - 28 + bob, 2, 10); }
     if (s.crown) { g.fillStyle = '#FFB020'; g.fillRect(v.x + 1, y - 46 + bob, 12, 5); }
     g.fillStyle = p.id === me?.id ? '#FFB020' : '#EAF2F5'; g.font = '9px Silkscreen, monospace'; g.textAlign = 'center'; g.fillText('@' + p.handle.slice(0, 14), v.x + 7, y - 50 + bob);
+  });
+  fights.forEach(f => {
+    const el = performance.now() - f.t0; if (el < 800 || el > 2600) return;
+    const y = TOP + (8 - f.r) * FH + 24, a = Math.floor(el / 150) % 2;
+    g.font = '14px Silkscreen, monospace'; g.textAlign = 'center'; g.fillStyle = a ? '#FFB020' : '#ff5a5f';
+    g.fillText(a ? 'POW!' : 'BAM!', 270, y); g.fillRect(262 + Math.sin(el / 20) * 6, y + 6, 4, 4);
   });
   requestAnimationFrame(draw);
 }
