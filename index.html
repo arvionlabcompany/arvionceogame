@@ -55,10 +55,7 @@ canvas{width:100%;image-rendering:pixelated;background:#0a1626;border:2px solid 
   <div class="row">
     <section class="card"><h3>ARVION LAB · MEU FUNCIONÁRIO</h3>
       <div class="stats" id="stats"></div>
-      <div class="actions">
-        <button class="btn" data-a="work">Trabalhar</button><button class="btn alt" data-a="rest">Descansar</button>
-        <button class="btn alt" data-a="eat">Comer (R$ 20)</button><button class="btn" id="promo" style="background:var(--amber)">Pedir promoção</button>
-      </div>
+      <p style="font-size:13px;color:#9fb4c4;margin:10px 0 0">Seu funcionário age sozinho: trabalha, descansa, come e disputa cargos. A cada minuto tudo pode mudar.</p>
       <div id="msg"></div>
       <button class="btn alt share" id="share">Compartilhar</button>
     </section>
@@ -116,20 +113,17 @@ function ui() {
   const all = Object.values(players), top = (k) => [...all].sort((a, b) => b[k] - a[k]).slice(0, 5);
   const ceo = all.find(x => x.role === 8), li = a => a.map(x => `<li>@${x.handle}</li>`).join('') || '<li>—</li>';
   const vag = ROLES.map((n, i) => i > 1 ? `<li>${n}: ${CAP[i] - all.filter(x => x.role === i).length} de ${CAP[i]}</li>` : '').join('');
-  const hist = k => feed.filter(f => f.kind === k).slice(0, 5).map(f => `<li>@${f.handle}${k === 'promo' ? ' → ' + ROLES[f.role] : ''}</li>`).join('') || '<li>—</li>';
+  const hist = k => feed.filter(f => f.kind === k).slice(0, 5).map(f => `<li>@${f.handle}${k === 'promo' ? ' → ' + ROLES[f.role] : k === 'demote' ? ' caiu para ' + ROLES[f.role] : k === 'duel' ? ' venceu @' + f.other + ' (' + ROLES[f.role] + ')' : ''}</li>`).join('') || '<li>—</li>';
   $('#mural').innerHTML = `<div class="logo" style="font-size:12px">${BRAND}</div><div style="font-size:12px;color:#9fb4c4">${SLOGAN}</div>
    <h4>CEO atual</h4><ul><li>${ceo ? '@' + ceo.handle : 'Vaga aberta'}</li></ul>
    <h4>Últimas promoções · ARVION LAB</h4><ul>${hist('promo')}</ul>
+   <h4>Disputas</h4><ul>${hist('duel')}</ul>
+   <h4>Quedas de cargo</h4><ul>${hist('demote')}</ul>
    <h4>Mais ricos</h4><ol>${top('money').map(x => `<li>@${x.handle} · ${brl(x.money)}</li>`).join('')}</ol>
    <h4>Mais felizes</h4><ol>${li(top('happiness'))}</ol>
    <h4>Últimas contratações</h4><ul>${hist('hire')}</ul><h4>Vagas disponíveis</h4><ul>${vag}</ul>`;
 }
-async function refreshMe() { const { data } = await sb.from('players').select('*').eq('id', me.id).single(); if (data) { players[data.id] = data; ui(); } }
-document.querySelectorAll('[data-a]').forEach(b => b.onclick = async () => {
-  const { error } = await sb.rpc('do_action', { p_token: me.token, p_kind: b.dataset.a });
-  $('#msg').textContent = error ? 'Erro: ' + error.message : ''; await refreshMe();
-});
-$('#promo').onclick = async () => { const { data, error } = await sb.rpc('request_promotion', { p_token: me.token }); $('#msg').textContent = error ? error.message : data; };
+// ações, promoções, quedas e disputas agora são automáticas (função tick() no servidor)
 $('#share').onclick = () => { const t = `Entrei na ${BRAND} como @${me.handle}. ${SLOGAN}`; navigator.share ? navigator.share({ title: BRAND, text: t, url: location.href }) : navigator.clipboard.writeText(t + ' ' + location.href).then(() => $('#msg').textContent = 'Texto copiado.'); };
 
 // ====== Desenho ======
