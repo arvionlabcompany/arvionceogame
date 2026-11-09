@@ -110,7 +110,6 @@ async function start() {
   sb.channel('arvion').on('postgres_changes', { event: '*', schema: 'public', table: 'players' }, p => {
     if (p.eventType === 'DELETE') delete players[p.old.id]; else players[p.new.id] = p.new; ui();
   }).on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'feed' }, refreshFeed).subscribe();
-  setInterval(() => { tgt = 40 + Math.random() * 860; sb.rpc('move_player', { p_token: me.token, p_x: Math.round(tgt) }); }, 6000);
   setInterval(refresh, 20000); requestAnimationFrame(draw);
 }
 async function refresh() {
@@ -235,9 +234,18 @@ function draw(t) {
     for (let d = 0; d < 4; d++) { g.fillStyle = '#5c3d1e'; g.fillRect(180 + d * 190, y + FH - 28, 60, 8); g.fillStyle = '#2EE6C5'; g.fillRect(195 + d * 190, y + FH - 44, 22, 16); }
     g.fillStyle = '#FFB020'; g.fillRect(900, y + 18, 24, FH - 22);
   }
+  // cada andar é dividido em vagas; cada jogador anda só dentro da sua
+  const byRole = {};
+  Object.values(players).forEach(p => (byRole[p.role] ||= []).push(p));
+  Object.values(byRole).forEach(L => L.sort((a, b) => a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1 : a.id < b.id ? -1 : 1));
   Object.values(players).forEach(p => {
-    const v = vis[p.id] ||= { x: p.x }; v.x += (p.x - v.x) * 0.04;
-    const y = TOP + (8 - p.role) * FH + FH - 4, s = SPR[p.role], bob = Math.sin(t / 200 + v.x) * 1.5;
+    const L = byRole[p.role], i = L.indexOf(p), sw = 390 / L.length;       // largura da vaga
+    const cx = 60 + sw * (i + 0.5), range = Math.max(0, Math.min(sw, 90) / 2 - 8);
+    const ph = [...p.id].reduce((a, ch) => a + ch.charCodeAt(0), 0);
+    const v = vis[p.id] ||= { base: cx, x: cx };
+    v.base += (cx - v.base) * 0.04;                                        // desliza até a vaga se ela mudar
+    v.x = v.base + range * Math.sin(ph + t / 2200);                        // vai e volta devagar
+    const y = TOP + (8 - p.role) * FH + FH - 4, s = SPR[p.role], bob = Math.sin(t / 200 + ph) * 1.5;
     g.fillStyle = s.b; g.fillRect(v.x, y - 30 + bob, 14, 18); g.fillStyle = '#f1c9a5'; g.fillRect(v.x + 2, y - 40 + bob, 10, 10);
     g.fillStyle = '#222'; g.fillRect(v.x + 2, y - 12, 4, 12); g.fillRect(v.x + 8, y - 12, 4, 12);
     if (s.t) { g.fillStyle = '#c0392b'; g.fillRect(v.x + 6, y - 28 + bob, 2, 10); }
