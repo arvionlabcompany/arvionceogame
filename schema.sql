@@ -1,48 +1,35 @@
--- ARVION LAB: CEO TYCOON — v4: reinado do CEO + eventos globais
--- Rode inteiro no SQL Editor (depois do update-v3.sql). Pode rodar mais de uma vez.
+-- ARVION LAB: CEO TYCOON — v5: moradia com aluguel + conquistas
+-- Rode inteiro no SQL Editor (depois do update-v4.sql). Pode rodar mais de uma vez.
 
--- 1) Reinados do CEO (hall da fama)
-create table if not exists reigns(
-  id bigserial primary key, handle text not null,
-  started_at timestamptz not null default now(), ended_at timestamptz);
-alter table reigns enable row level security;
-drop policy if exists "ler" on reigns;
-create policy "ler" on reigns for select to anon using (true);
+-- 1) Conquistas
+create table if not exists badges(
+  handle text not null, code text not null, created_at timestamptz not null default now(),
+  primary key (handle, code));
+alter table badges enable row level security;
+drop policy if exists "ler" on badges;
+create policy "ler" on badges for select to anon using (true);
 
-create or replace function track_reign() returns void language plpgsql security definer set search_path=public as $$
-declare c text; oid bigint; oh text;
+create or replace function award_badges() returns void language plpgsql security definer set search_path=public as $$
 begin
-  select handle into c from players where role=8 limit 1;
-  select id, handle into oid, oh from reigns where ended_at is null order by id desc limit 1;
-  if oid is not null and (c is null or c <> oh) then update reigns set ended_at=now() where id=oid; oid := null; end if;
-  if c is not null and oid is null then insert into reigns(handle) values(c); end if;
+  with cand(handle, code) as (
+    select distinct handle, 'primeira_promocao'::text from feed where kind='promo'
+    union select distinct handle, 'ja_foi_ceo'::text from reigns
+    union select distinct handle, 'rei_10min'::text from reigns where coalesce(ended_at, now()) - started_at >= interval '10 minutes'
+    union select handle, 'lutador'::text from feed where kind='brawl' group by handle having count(*) >= 3
+    union select handle, 'rico'::text from players where money >= 10000
+  ), ins as (
+    insert into badges(handle, code) select handle, code from cand where handle is not null on conflict do nothing returning handle, code
+  )
+  insert into feed(kind, handle, other) select 'badge', handle, code from ins;
 end $$;
 
--- 2) Eventos globais surpresa (em média 1 por hora)
---    65%: Avaliação de Desempenho — os 20% de menor desempenho de cada andar descem um cargo
---    35%: Bônus Geral — todos ganham 20% do salário
-create or replace function run_event() returns void language plpgsql security definer set search_path=public as $$
-declare r int; p record; rr roles; n int; total int := 0;
+-- 2) Moradia: o funcionário se mantém no melhor lugar que o dinheiro permite e paga o aluguel a cada rodada
+create or replace function run_living() returns void language plpgsql security definer set search_path=public as $$
 begin
-  perform pg_advisory_xact_lock(42);
-  if random() >= 1.0/60 then return; end if;
-  if random() < 0.65 then
-    for r in 2..8 loop
-      select count(*) into n from players where role=r;
-      if n >= 3 or (r = 8 and n = 1 and random() < 0.25) then
-        select * into rr from roles where id=r-1;
-        for p in select id, handle from players where role=r order by performance asc, random() limit greatest(1, n/5) loop
-          update players set role=rr.id, salary=rr.salary, performance=rr.id*12, status='Cortado na avaliação' where id=p.id;
-          insert into feed(kind,handle,role) values('demote',p.handle,rr.id);
-          total := total + 1;
-        end loop;
-      end if;
-    end loop;
-    insert into feed(kind,handle,role) values('review','ARVION LAB',total);
-  else
-    update players set money=money+salary/5.0, happiness=least(100,happiness+5);
-    insert into feed(kind,handle,role) values('bonus','ARVION LAB',0);
-  end if;
+  update players set
+    housing = case when money >= 6000 then 'Cobertura' when money >= 1500 then 'Apartamento' when money >= 300 then 'Kitnet' else 'Quarto compartilhado' end,
+    money = greatest(0, money - case when money >= 6000 then 40 when money >= 1500 then 12 when money >= 300 then 4 else 0 end),
+    happiness = least(100, happiness + case when money >= 6000 then 2 when money >= 1500 then 1 else 0 end);
 end $$;
 
 -- 3) Rodada completa
@@ -51,8 +38,9 @@ begin
   perform tick();
   perform run_brawls();
   perform run_event();
+  perform run_living();
   perform track_reign();
+  perform award_badges();
 end $$;
 
-revoke execute on function track_reign(), run_event(), tick_all() from anon, authenticated, public;
-select track_reign();  -- registra o CEO atual, se já houver
+revoke execute on function award_badges(), run_living(), tick_all() from anon, authenticated, public;

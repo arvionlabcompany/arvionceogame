@@ -122,10 +122,12 @@ async function start() {
   }).on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'feed' }, refreshFeed).subscribe();
   setInterval(refresh, 20000); requestAnimationFrame(draw);
 }
-let reigns = [];
+let reigns = [], badges = [];
+const BADGES = { primeira_promocao: ['⬆️', 'Primeira promoção'], ja_foi_ceo: ['👑', 'Já foi CEO'], rei_10min: ['⏱️', 'Reinou por 10 min'], lutador: ['🥊', 'Lutador: 3 brigas vencidas'], rico: ['💎', 'Rico: R$ 10 mil'] };
 async function refresh() {
   const { data } = await sb.from('players').select('*'); players = {}; (data || []).forEach(p => players[p.id] = p);
   const rg = await sb.from('reigns').select('*').order('started_at', { ascending: false }).limit(200); reigns = rg.data || [];
+  const bd = await sb.from('badges').select('*'); badges = bd.data || [];
   await refreshFeed(); ui();
 }
 let lastFeedId = null; const fights = [];
@@ -139,7 +141,7 @@ function ui() {
   const p = players[me?.id]; if (!p) return;
   $('#who').textContent = '@' + p.handle + ' · ' + ROLES[p.role];
   const s = (l, v, max) => `<div>${l}: <b>${v}</b>${max ? `<div class="bar"><i style="width:${v}%"></i></div>` : ''}</div>`;
-  $('#stats').innerHTML = s('Cargo', ROLES[p.role]) + s('Salário', brl(p.salary)) + s('Dinheiro', brl(p.money)) + s('Moradia', p.housing)
+  $('#stats').innerHTML = s('Cargo', ROLES[p.role]) + s('Salário', brl(p.salary)) + s('Dinheiro', brl(p.money)) + s('Moradia', p.housing) + s('Conquistas', badges.filter(b => b.handle === p.handle).map(b => (BADGES[b.code] || [''])[0]).join(' ') || '—')
     + s('Saúde', p.health, 1) + s('Felicidade', p.happiness, 1) + s('Cansaço', p.fatigue, 1) + s('Energia', p.energy, 1)
     + s('Desempenho', p.performance + ' / ' + (p.role * 25)) + s('Status', p.status);
   const all = Object.values(players), top = (k) => [...all].sort((a, b) => b[k] - a[k]).slice(0, 5);
@@ -182,13 +184,14 @@ function renderStats() {
    <div class="kpis"><div><b>${cnt('promo')}</b>promoções</div><div><b>${cnt('demote')}</b>quedas</div>
    <div><b>${gap('promo')}</b>entre promoções</div><div><b>${gap('demote')}</b>entre quedas</div>
    <div><b>${gap('duel')}</b>entre disputas</div><div><b>${reign}</b>reinado do CEO atual</div></div>
+   <h3 style="margin-top:14px">MINHAS CONQUISTAS</h3><ul style="list-style:none;padding:0">${Object.entries(BADGES).map(([c, [e, n]]) => `<li>${badges.some(b => b.handle === me.handle && b.code === c) ? e : '🔒'} ${n}</li>`).join('')}</ul>
    <h3 style="margin-top:14px">HALL DA FAMA · MAIORES REINADOS</h3><ol style="margin:0;padding-left:20px;font-size:14px;line-height:1.7">${[...reigns].map(r => ({ h: r.handle, ms: (r.ended_at ? +new Date(r.ended_at) : now) - new Date(r.started_at), on: !r.ended_at })).sort((a, b) => b.ms - a.ms).slice(0, 5).map(x => `<li>@${x.h} · ${dur(x.ms)}${x.on ? ' (reinando agora)' : ''}</li>`).join('') || '<li>Sem reinados ainda.</li>'}</ol>
    <h3 style="margin-top:14px">ÚLTIMOS MOVIMENTOS</h3><ul>${last || '<li>Sem movimentos ainda.</li>'}</ul>`;
 }
 function renderHist() {
   const h = me.handle, L = feed.filter(f => f.handle === h || f.other === h).slice(0, 40).map(f => {
     const s = f.kind === 'hire' ? 'Você entrou na ARVION LAB como Estagiário' : f.kind === 'promo' ? 'Você foi promovido a ' + ROLES[f.role]
-      : f.kind === 'demote' ? 'Você caiu para ' + ROLES[f.role] : f.kind === 'brawl' ? (f.handle === h ? 'Você venceu uma briga e derrubou @' + f.other : 'Você perdeu a briga para @' + f.handle + ' e desceu para ' + ROLES[f.role - 1]) : f.handle === h ? 'Você venceu @' + f.other + ' na disputa por ' + ROLES[f.role] : 'Você perdeu a disputa para @' + f.handle;
+      : f.kind === 'demote' ? 'Você caiu para ' + ROLES[f.role] : f.kind === 'badge' ? 'Conquista desbloqueada: ' + (BADGES[f.other] || ['', f.other])[1] : f.kind === 'brawl' ? (f.handle === h ? 'Você venceu uma briga e derrubou @' + f.other : 'Você perdeu a briga para @' + f.handle + ' e desceu para ' + ROLES[f.role - 1]) : f.handle === h ? 'Você venceu @' + f.other + ' na disputa por ' + ROLES[f.role] : 'Você perdeu a disputa para @' + f.handle;
     return `<li><b>${ago(f.created_at)}</b> · ${s}</li>`; });
   $('#t-hist').innerHTML = `<h3>ARVION LAB · MINHA HISTÓRIA</h3><ul>${L.join('') || '<li>Nada ainda. Aguarde o próximo ciclo.</li>'}</ul>`;
 }
@@ -257,6 +260,7 @@ function onEvent(f) {
   else if (f.kind === 'demote') toast('▼ @' + f.handle + ' desceu para ' + r, 'down');
   else if (f.kind === 'duel') toast('⚔ @' + f.handle + ' venceu @' + f.other + ' (' + r + ')', 'vs');
   else if (f.kind === 'review') banner('⚠ AVALIAÇÃO DE DESEMPENHO', f.role + ' funcionário(s) desceram de cargo', 'down');
+  else if (f.kind === 'badge') toast('🏅 @' + f.handle + ' ganhou: ' + (BADGES[f.other] || ['', f.other])[1], 'up');
   else if (f.kind === 'bonus') banner('💰 BÔNUS GERAL', 'Todos receberam um bônus da empresa', 'up');
   else if (f.kind === 'brawl') {
     toast('▼ @' + f.other + ' desceu para ' + ROLES[f.role - 1], 'down'); toast('⚔ @' + f.handle + ' venceu a briga', 'vs');
@@ -279,6 +283,16 @@ function draw(t) {
     for (let d = 0; d < 4; d++) { g.fillStyle = '#5c3d1e'; g.fillRect(180 + d * 190, y + FH - 28, 60, 8); g.fillStyle = '#2EE6C5'; g.fillRect(195 + d * 190, y + FH - 44, 22, 16); }
     g.fillStyle = '#FFB020'; g.fillRect(900, y + 18, 24, FH - 22);
   }
+  // ambiente: luzes à noite, cafeteiras, plantas e elevador animado
+  const hr = new Date().getHours();
+  if (hr < 6 || hr >= 19) { g.fillStyle = 'rgba(5,10,40,0.28)'; g.fillRect(30, TOP, 900, 8 * FH - 4); }
+  for (let r = 1; r <= 8; r++) {
+    const gy = TOP + (8 - r) * FH + FH - 4;
+    g.fillStyle = '#7a8a99'; g.fillRect(780, gy - 28, 14, 28); g.fillStyle = Math.sin(t / 400 + r) > 0 ? '#ff5a5f' : '#552'; g.fillRect(783, gy - 24, 4, 4);
+    g.fillStyle = '#2e8b57'; g.fillRect(830, gy - 18, 12, 18); g.fillStyle = '#3cb371'; g.fillRect(826, gy - 26, 20, 10);
+  }
+  const cabY = TOP + (Math.sin(t / 2500) * 0.5 + 0.5) * 7 * FH + 8;
+  g.fillStyle = '#0E1B2C'; g.fillRect(898, cabY, 28, FH - 20); g.fillStyle = '#FFB020'; g.fillRect(898, cabY, 28, 3); g.fillRect(911, cabY + 3, 2, FH - 23);
   // cada andar é dividido em vagas; cada jogador anda só dentro da sua
   const byRole = {};
   Object.values(players).forEach(p => (byRole[p.role] ||= []).push(p));
@@ -303,6 +317,7 @@ function draw(t) {
     if (s.t) { g.fillStyle = '#c0392b'; g.fillRect(v.x + 6, y - 28 + bob, 2, 10); }
     if (s.crown) { g.fillStyle = '#FFB020'; g.fillRect(v.x + 1, y - 46 + bob, 12, 5); }
     g.fillStyle = p.id === me?.id ? '#FFB020' : '#EAF2F5'; g.font = '9px Silkscreen, monospace'; g.textAlign = 'center'; g.fillText('@' + p.handle.slice(0, 14), v.x + 7, y - 50 + bob);
+    if (((t / 1000 + ph) % 14) < 3) { const e = p.fatigue > 70 ? '😴' : p.happiness >= 70 ? '😄' : p.money >= 5000 ? '💰' : '💻'; g.font = '14px sans-serif'; g.fillText(e, v.x + 7, y - 62 + bob); }
   });
   fights.forEach(f => {
     const el = performance.now() - f.t0; if (el < 800 || el > 2600) return;
