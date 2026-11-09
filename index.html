@@ -37,6 +37,18 @@ canvas{width:100%;image-rendering:pixelated;background:#0a1626;border:2px solid 
 .mural ol,.mural ul{margin:0;padding-left:18px;font-size:13px;color:#cfe0ea}
 #msg{margin-top:8px;color:var(--amber);font-size:13px;min-height:1.2em}
 .share{margin-top:8px}
+[hidden]{display:none!important}
+#game{padding-bottom:84px}
+#nav{position:fixed;left:0;right:0;bottom:0;display:flex;background:#08121f;border-top:2px solid var(--steel);padding-bottom:env(safe-area-inset-bottom,0px);z-index:5}
+#nav button{flex:1;padding:15px 4px;background:none;border:0;color:#9fb4c4;font:700 12px var(--px);cursor:pointer}
+#nav button.on{color:var(--teal);box-shadow:inset 0 -3px var(--teal)}
+.tab{margin-top:10px}.tab ul{margin:0;padding-left:18px;font-size:14px;line-height:1.7}
+.chart{display:flex;align-items:flex-end;gap:4px;height:130px;margin-top:8px}
+.col{flex:1;height:100%;display:flex;flex-direction:column-reverse;background:#0b1a2b}.col i{display:block}
+.ax{display:flex;justify-content:space-between;font-size:11px;color:#9fb4c4;margin-top:4px}
+.kpis{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:12px;font-size:13px}
+.kpis b{display:block;font-family:var(--px);font-size:16px;color:var(--teal)}
+.lg{font-size:12px;margin-top:6px;color:#9fb4c4}.lg u{text-decoration:none;display:inline-block;width:10px;height:10px;margin:0 4px 0 10px}
 </style>
 </head>
 <body>
@@ -51,16 +63,21 @@ canvas{width:100%;image-rendering:pixelated;background:#0a1626;border:2px solid 
 
 <div id="game">
   <header><div class="logo">ARVION LAB<small>CEO TYCOON</small></div><div id="who"></div></header>
+  <div id="t-jogo">
   <canvas id="c" width="960" height="760"></canvas>
   <div class="row">
     <section class="card"><h3>ARVION LAB · MEU FUNCIONÁRIO</h3>
       <div class="stats" id="stats"></div>
       <p style="font-size:13px;color:#9fb4c4;margin:10px 0 0">Seu funcionário age sozinho: trabalha, descansa, come e disputa cargos. A cada minuto tudo pode mudar.</p>
       <div id="msg"></div>
-      <button class="btn alt share" id="share">Compartilhar</button>
+      <div class="actions"><button class="btn alt share" id="share">Compartilhar link</button><button class="btn share" id="card">Gerar card para story</button></div>
     </section>
     <section class="card mural"><h3>ARVION LAB · MURAL DA EMPRESA</h3><div id="mural"></div></section>
   </div>
+  </div>
+  <section id="t-stats" class="card tab" hidden></section>
+  <section id="t-hist" class="card tab" hidden></section>
+  <nav id="nav"><button data-t="jogo" class="on">JOGO</button><button data-t="stats">ESTATÍSTICAS</button><button data-t="hist">MINHA HISTÓRIA</button></nav>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
@@ -101,7 +118,7 @@ async function refresh() {
   await refreshFeed(); ui();
 }
 async function refreshFeed() {
-  const { data } = await sb.from('feed').select('*').order('id', { ascending: false }).limit(60); feed = data || []; ui();
+  const { data } = await sb.from('feed').select('*').order('id', { ascending: false }).limit(400); feed = data || []; ui();
 }
 function ui() {
   const p = players[me?.id]; if (!p) return;
@@ -123,7 +140,85 @@ function ui() {
    <h4>Mais felizes</h4><ol>${li(top('happiness'))}</ol>
    <h4>Últimas contratações</h4><ul>${hist('hire')}</ul><h4>Vagas disponíveis</h4><ul>${vag}</ul>`;
 }
-// ações, promoções, quedas e disputas agora são automáticas (função tick() no servidor)
+// ações, promoções, quedas e disputas são automáticas (função tick() no servidor)
+
+// ====== Abas ======
+document.querySelectorAll('#nav button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('#nav button').forEach(x => x.classList.toggle('on', x === b));
+  ['jogo', 'stats', 'hist'].forEach(k => $('#t-' + k).hidden = k !== b.dataset.t); window.scrollTo(0, 0);
+});
+const ago = d => { const s = (Date.now() - new Date(d)) / 1000; return s < 60 ? 'agora' : s < 3600 ? 'há ' + Math.floor(s / 60) + ' min' : s < 86400 ? 'há ' + Math.floor(s / 3600) + ' h' : 'há ' + Math.floor(s / 86400) + ' d'; };
+const dur = ms => { const m = Math.round(ms / 60000); return m < 1 ? 'menos de 1 min' : m < 60 ? m + ' min' : (m / 60).toFixed(1).replace('.', ',') + ' h'; };
+const gap = k => { const t = feed.filter(f => f.kind === k).map(f => +new Date(f.created_at)).sort((a, b) => a - b); return t.length < 2 ? '—' : dur((t[t.length - 1] - t[0]) / (t.length - 1)); };
+
+function renderStats() {
+  const N = 12, H = 3600e3, now = Date.now(), b = Array.from({ length: N }, () => ({ p: 0, d: 0, v: 0 }));
+  feed.forEach(f => { const i = N - 1 - Math.floor((now - new Date(f.created_at)) / H); if (i < 0 || i >= N) return; if (f.kind === 'promo') b[i].p++; else if (f.kind === 'demote') b[i].d++; else if (f.kind === 'duel') b[i].v++; });
+  const mx = Math.max(1, ...b.map(x => x.p + x.d + x.v)), cnt = k => feed.filter(f => f.kind === k).length;
+  const ceo = Object.values(players).find(x => x.role === 8), ev = feed.find(f => f.role === 8 && (f.kind === 'promo' || f.kind === 'duel'));
+  const reign = ceo && ev && ev.handle === ceo.handle ? dur(now - new Date(ev.created_at)) : '—';
+  const last = feed.filter(f => ['promo', 'demote', 'duel'].includes(f.kind)).slice(0, 10).map(f => `<li><b>${ago(f.created_at)}</b> · @${f.handle} ${f.kind === 'promo' ? 'subiu para ' + ROLES[f.role] : f.kind === 'demote' ? 'caiu para ' + ROLES[f.role] : 'venceu @' + f.other + ' (' + ROLES[f.role] + ')'}</li>`).join('');
+  $('#t-stats').innerHTML = `<h3>ARVION LAB · ESTATÍSTICAS</h3>
+   <div style="font-size:13px;color:#9fb4c4">Últimas 12 horas, hora a hora</div>
+   <div class="chart">${b.map(x => `<div class="col"><i style="height:${x.p / mx * 100}%;background:#2EE6C5"></i><i style="height:${x.v / mx * 100}%;background:#FFB020"></i><i style="height:${x.d / mx * 100}%;background:#ff5a5f"></i></div>`).join('')}</div>
+   <div class="ax"><span>-12 h</span><span>agora</span></div>
+   <div class="lg"><u style="background:#2EE6C5"></u>promoções<u style="background:#FFB020"></u>disputas<u style="background:#ff5a5f"></u>quedas</div>
+   <div class="kpis"><div><b>${cnt('promo')}</b>promoções</div><div><b>${cnt('demote')}</b>quedas</div>
+   <div><b>${gap('promo')}</b>entre promoções</div><div><b>${gap('demote')}</b>entre quedas</div>
+   <div><b>${gap('duel')}</b>entre disputas</div><div><b>${reign}</b>reinado do CEO atual</div></div>
+   <h3 style="margin-top:14px">ÚLTIMOS MOVIMENTOS</h3><ul>${last || '<li>Sem movimentos ainda.</li>'}</ul>`;
+}
+function renderHist() {
+  const h = me.handle, L = feed.filter(f => f.handle === h || f.other === h).slice(0, 40).map(f => {
+    const s = f.kind === 'hire' ? 'Você entrou na ARVION LAB como Estagiário' : f.kind === 'promo' ? 'Você foi promovido a ' + ROLES[f.role]
+      : f.kind === 'demote' ? 'Você caiu para ' + ROLES[f.role] : f.handle === h ? 'Você venceu @' + f.other + ' na disputa por ' + ROLES[f.role] : 'Você perdeu a disputa para @' + f.handle;
+    return `<li><b>${ago(f.created_at)}</b> · ${s}</li>`; });
+  $('#t-hist').innerHTML = `<h3>ARVION LAB · MINHA HISTÓRIA</h3><ul>${L.join('') || '<li>Nada ainda. Aguarde o próximo ciclo.</li>'}</ul>`;
+}
+let firstUi = true; const baseUi = ui;
+ui = function () {
+  baseUi(); if (!me || !players[me.id]) return; renderStats(); renderHist();
+  if (firstUi && feed.length) {
+    firstUi = false; const seen = +localStorage.getItem('arvion_seen') || 0;
+    const n = feed.filter(f => (f.handle === me.handle || f.other === me.handle) && f.kind !== 'hire' && +new Date(f.created_at) > seen).length;
+    if (seen && n) $('#msg').textContent = 'Enquanto você esteve fora: ' + n + ' acontecimento(s). Veja em MINHA HISTÓRIA.';
+  }
+};
+const markSeen = () => localStorage.setItem('arvion_seen', Date.now());
+document.addEventListener('visibilitychange', () => { if (document.hidden) markSeen(); }); addEventListener('pagehide', markSeen); setInterval(markSeen, 30000);
+
+// ====== Card para story (PNG 1080x1920) ======
+function makeCard() {
+  const p = players[me.id], mine = feed.find(f => f.kind !== 'hire' && (f.handle === me.handle || f.other === me.handle));
+  let head = 'SOU ' + ROLES[p.role].toUpperCase(), sub = 'NA ARVION LAB', col = '#2EE6C5';
+  if (mine) {
+    const won = mine.handle === me.handle;
+    if (mine.kind === 'promo') { head = 'PROMOÇÃO!'; sub = 'AGORA SOU ' + ROLES[mine.role].toUpperCase(); }
+    else if (mine.kind === 'demote') { head = 'QUE QUEDA!'; sub = 'CAÍ PARA ' + ROLES[mine.role].toUpperCase(); col = '#ff5a5f'; }
+    else if (mine.kind === 'duel') { head = won ? 'VENCI A DISPUTA' : 'PERDI A DISPUTA'; sub = (won ? 'CONTRA @' + mine.other : 'PARA @' + mine.handle).toUpperCase(); col = won ? '#FFB020' : '#ff5a5f'; }
+  }
+  const cv = document.createElement('canvas'); cv.width = 1080; cv.height = 1920; const x = cv.getContext('2d'), F = "Silkscreen, 'Courier New', monospace";
+  const t = (s, px, y, sz, color) => { let z = sz; x.textAlign = 'center'; do { x.font = `700 ${z}px ${F}`; z -= 2; } while (x.measureText(s).width > 960 && z > 20); x.fillStyle = color; x.fillText(s, px, y); };
+  x.fillStyle = '#0E1B2C'; x.fillRect(0, 0, 1080, 1920); x.fillStyle = '#12253a'; x.fillRect(60, 60, 960, 1800); x.strokeStyle = '#31465C'; x.lineWidth = 6; x.strokeRect(60, 60, 960, 1800);
+  x.save(); x.translate(420, 150); x.scale(7, 7); x.fillStyle = '#2EE6C5'; x.fill(new Path2D('M16 5 26 27h-5l-5-12-5 12H6z')); x.fillStyle = '#FFB020'; x.fillRect(13, 21, 6, 3); x.restore();
+  t('ARVION LAB', 540, 480, 84, '#2EE6C5'); t('CEO TYCOON', 540, 540, 40, '#FFB020');
+  t('@' + me.handle, 540, 720, 72, '#EAF2F5'); t(head, 540, 920, 110, col); t(sub, 540, 1010, 48, '#EAF2F5');
+  const s = SPR[p.role], k = 12, sx = 540 - 14 * k, gy = 1520;
+  x.fillStyle = '#222'; x.fillRect(sx + 4 * k, gy - 12 * k, 4 * k, 12 * k); x.fillRect(sx + 10 * k, gy - 12 * k, 4 * k, 12 * k);
+  x.fillStyle = s.b; x.fillRect(sx, gy - 30 * k, 14 * k * 2 / 2 + 14 * k, 18 * k); x.fillStyle = '#f1c9a5'; x.fillRect(sx + 4 * k, gy - 40 * k, 20 * k, 10 * k);
+  if (s.t) { x.fillStyle = '#c0392b'; x.fillRect(sx + 12 * k, gy - 28 * k, 4 * k, 10 * k); }
+  if (s.crown) { x.fillStyle = '#FFB020'; x.fillRect(sx + 2 * k, gy - 46 * k, 24 * k, 5 * k); }
+  t(ROLES[p.role].toUpperCase(), 540, 1600, 44, '#9fb4c4');
+  t(SLOGAN, 540, 1730, 30, '#EAF2F5'); t('ENTRE NA EMPRESA: ' + location.host, 540, 1800, 30, '#FFB020');
+  cv.toBlob(async b => {
+    const file = new File([b], 'arvion-lab.png', { type: 'image/png' });
+    try {
+      if (navigator.canShare && navigator.canShare({ files: [file] })) await navigator.share({ files: [file], title: BRAND, text: `${head} ${sub} · ${BRAND}\n${location.href}` });
+      else { const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = 'arvion-lab.png'; a.click(); $('#msg').textContent = 'Card salvo no seu aparelho.'; }
+    } catch (e) { /* compartilhamento cancelado */ }
+  });
+}
+$('#card').onclick = makeCard;
 $('#share').onclick = () => { const t = `Entrei na ${BRAND} como @${me.handle}. ${SLOGAN}`; navigator.share ? navigator.share({ title: BRAND, text: t, url: location.href }) : navigator.clipboard.writeText(t + ' ' + location.href).then(() => $('#msg').textContent = 'Texto copiado.'); };
 
 // ====== Desenho ======
